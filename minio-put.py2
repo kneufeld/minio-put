@@ -1,11 +1,14 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python2
+
+from __future__ import print_function
 
 import os
 import sys
 import glob
 import argparse
 import datetime
-import urllib.request
+import time
+import httplib
 
 # usage: ./mc-put.py my-bucket my-file.zip file2 'fileglob*'
 
@@ -25,27 +28,29 @@ def upload(key, secret, host, bucket, filename):
         hostname, port = host.split(':')
     except ValueError:
         hostname = host
+        port = None
 
-    resource     = f"/{bucket}/{base_name}"
+    resource     = "/{bucket}/{base_name}".format(bucket=bucket, base_name=base_name)
     content_type = "application/octet-stream"
     #date         = filetime(filename).strftime('%a, %d %b %Y %X %z')
-    date         = tznow().strftime('%a, %d %b %Y %X %z')
-    _signature   = f"PUT\n\n{content_type}\n{date}\n{resource}"
+    date         = tznow()
+    _signature   = "PUT\n\n{content_type}\n{date}\n{resource}".format(content_type=content_type, date=date, resource=resource)
     signature    = sig_hash(secret, _signature)
 
-    url = f"https://{host}{resource}"
+    url = "https://{host}{resource}".format(host=host, resource=resource)
     headers = {
         'Host':          hostname,
         'Date':          date,                      # eg. Sat, 03 Mar 2018 10:11:16 -0700
         'Content-Type':  content_type,
-        'Authorization': f"AWS {key}:{signature}",
+        'Authorization': "AWS {key}:{signature}".format(key=key, signature=signature),
     }
     # import pprint
     # pprint.pprint(headers)
 
-    req = urllib.request.Request(url, data=open(filename), method='PUT', headers=headers)
-    resp = urllib.request.urlopen(req)
-    return resp.read() or True
+    conn = httplib.HTTPSConnection(host, port)
+    conn.request('PUT', url, open(filename), headers)
+    resp = conn.getresponse()
+    return resp or True
 
 
 def parse_cmdline(args):
@@ -90,11 +95,20 @@ def filetime(filename):
 
 
 def tznow():
-    def utc_to_local(utc_dt):
-        return utc_dt.replace(tzinfo=datetime.timezone.utc).astimezone(tz=None)
+    """
+    since we don't want any external dependencies we have
+    to hack our way to timezone nirvana since for what is
+    no doubt really good reasons python doesn't know the
+    current timezone but does know how many seconds away
+    utc is...
 
-    ts = datetime.datetime.utcnow()
-    return utc_to_local(ts)
+    return appropriately formated string
+    eg. Sat, 03 Mar 2018 10:11:16 -0700
+    """
+
+    offset = time.strftime("%z")
+    now    = datetime.datetime.now()
+    return now.strftime("%a, %d %b %Y %X {}".format(offset))
 
 
 # based on: https://gist.github.com/heskyji/5167567b64cb92a910a3
@@ -105,15 +119,12 @@ def sig_hash(secret, sig):
 
     #signature=`echo -en ${sig} | openssl sha1 -hmac ${secret} -binary | base64`
 
-    secret     = bytes(secret, 'UTF-8')
-    sig        = bytes(sig, 'UTF-8')
-
     digester   = hmac.new(secret, sig, hashlib.sha1)
     signature1 = digester.digest()
     signature2 = base64.standard_b64encode(signature1)
     # signature2 = base64.urlsafe_b64encode(signature1)
 
-    return str(signature2, 'UTF-8')
+    return signature2
 
 
 def mk_filelist(args):
@@ -137,8 +148,8 @@ def main(args):
     for filename in files:
         try:
             upload(args.key, args.secret, args.host, args.bucket, filename)
-            print(f"uploaded: {filename}")
-        except urllib.error.HTTPError as e:
+            print("uploaded: {}".format(filename))
+        except httplib.HTTPException as e:
             print("error uploading: {}".format(filename))
             print(e)
             sys.exit(1)
