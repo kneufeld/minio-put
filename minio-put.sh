@@ -9,7 +9,8 @@ host=${S3_HOST:-minio.example.com}
 s3_key=${S3_KEY:-secret key}
 s3_secret=${S3_SECRET:-secret token}
 
-resource="/${bucket}/${file}"
+base_file=`basename ${file}`
+resource="/${bucket}/${base_file}"
 content_type="application/octet-stream"
 date=`date -R`
 _signature="PUT\n\n${content_type}\n${date}\n${resource}"
